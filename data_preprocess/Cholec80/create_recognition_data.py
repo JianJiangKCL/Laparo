@@ -16,30 +16,36 @@ def get_all_phases_and_tools(data_list):
     phases = set()
     tools = set()
     for data in data_list:
-        phases.add(data['phase'])
-        tools.update(data['tools'])
+        if 'phase' in data:
+            phases.add(data['phase'])
+        if 'tools' in data:
+            tools.update(data['tools'])
     return list(phases - {'Unknown'}), list(tools)
 
-def create_mcq_question(category, all_options, frame_data):
+def create_mcq_question(category, all_options, frame_data, num_options=5):
     if category == "phase":
+        if 'phase' not in frame_data:
+            return None
         correct_answer = frame_data['phase']
         if correct_answer == "Unknown":
             return None
         question = "Given the cholecystectomy surgical image <image>, which surgical phase is being performed?"
     else:  # tool category
-        tools = frame_data['tools']
-        if not tools:  # Skip if no tools are present
+        if 'tools' not in frame_data or not frame_data['tools']:
             return None
+        tools = frame_data['tools']
         correct_answer = random.choice(tools)
         question = "Given the cholecystectomy surgical image <image>, which surgical instrument is being used?"
     
     # Get distractors (excluding the correct answer)
     other_options = [opt for opt in all_options if opt != correct_answer]
-    distractors = random.sample(other_options, min(4, len(other_options)))
     
-    # Ensure we have exactly 5 options (ABCDE)
-    while len(distractors) < 4:
-        distractors.append("None of the above")
+    # Adjust num_options to not exceed the total available options
+    total_available = len(other_options) + 1
+    actual_num_options = min(num_options, total_available)
+    
+    # Select random distractors
+    distractors = random.sample(other_options, min(actual_num_options - 1, len(other_options)))
     
     all_choices = [correct_answer] + distractors
     random.shuffle(all_choices)
@@ -71,15 +77,17 @@ def create_mcq_question(category, all_options, frame_data):
 
 def create_vqa_question(category, frame_data):
     if category == "phase":
+        if 'phase' not in frame_data:
+            return None
         phase = frame_data['phase']
         if phase == "Unknown":
             return None
         question = "Given the cholecystectomy surgical image <image>, which surgical phase is being performed?"
         answer_text = phase
     else:  # tool category
-        tools = frame_data['tools']
-        if not tools:  # Skip if no tools are present
+        if 'tools' not in frame_data or not frame_data['tools']:
             return None
+        tools = frame_data['tools']
         question = "Given the cholecystectomy surgical image <image>, what surgical instruments are being used?"
         # Format multiple tools with commas and 'and'
         if len(tools) == 1:
@@ -111,6 +119,7 @@ def main():
     parser = argparse.ArgumentParser(description='Create recognition data for Cholec80 surgical video frames')
     parser.add_argument('--mode', choices=['mcq', 'vqa'], required=True, help='Mode of question generation')
     parser.add_argument('--category', choices=['phase', 'tool'], required=True, help='Category of question')
+    parser.add_argument('--num_options', type=int, default=5, help='Number of options for MCQ questions (default: 5)')
     parser.add_argument('--input_jsonl', type=str,
                        default='/opt/liblibai-models/user-workspace/jj/proj/Laparo/data_json/Cholec80/meta_data.jsonl',
                        help='Path to input JSONL file containing frame data')
@@ -132,6 +141,14 @@ def main():
     # Get all unique phases and tools
     all_phases, all_tools = get_all_phases_and_tools(frame_data_list)
     
+    # Check if the requested category has data
+    if args.category == 'phase' and not all_phases:
+        print("Error: No phase data found in the input file.")
+        sys.exit(1)
+    elif args.category == 'tool' and not all_tools:
+        print("Error: No tool data found in the input file.")
+        sys.exit(1)
+    
     # Process and write questions
     count = 0
     skipped = 0
@@ -142,7 +159,8 @@ def main():
                     formatted_data = create_mcq_question(
                         args.category,
                         all_phases if args.category == 'phase' else all_tools,
-                        frame_data
+                        frame_data,
+                        args.num_options
                     )
                 else:  # vqa mode
                     formatted_data = create_vqa_question(args.category, frame_data)
